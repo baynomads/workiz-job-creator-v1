@@ -239,7 +239,7 @@
         </div>
         
         <div class="status-info" id="statusInfo">
-            📋 <strong>Pipedrive Integration Active</strong> - This job will be created as a new deal in your pipeline.
+            📋 <strong>Initializing Pipedrive Integration...</strong>
         </div>
         
         <form id="jobForm">
@@ -382,8 +382,101 @@
         </div>
     </div>
 
-    <!-- Pipedrive App Extensions SDK -->
-    <script src="https://unpkg.com/@pipedrive/app-extensions-sdk@latest/dist/index.js"></script>
-    <script src="modal.js"></script>
+    <!-- Загружаем ПРАВИЛЬНУЮ UMD версию Pipedrive SDK для браузера -->
+    <script src="https://unpkg.com/@pipedrive/app-extensions-sdk@latest/dist/index.umd.js"></script>
+    
+    <!-- Быстрый fallback SDK если официальный не работает -->
+    <script>
+        // Проверяем загрузился ли официальный SDK через 2 секунды
+        setTimeout(function() {
+            if (typeof window.AppExtensionsSDK === 'undefined' && 
+                (!window.Pipedrive || !window.Pipedrive.AppExtensionsSDK)) {
+                
+                console.log('⚠️ Official SDK not loaded, installing fallback');
+                
+                // Создаем fallback SDK
+                window.AppExtensionsSDK = function(config = {}) {
+                    const identifier = config.identifier || new URLSearchParams(window.location.search).get('id');
+                    
+                    return {
+                        initialize: async function(initConfig) {
+                            console.log('⚠️ Using fallback SDK with identifier:', identifier);
+                            
+                            // Мгновенно уведомляем Pipedrive что готовы
+                            if (window.parent !== window) {
+                                try {
+                                    window.parent.postMessage({
+                                        type: 'pipedriveAppExtensionReady',
+                                        identifier: identifier,
+                                        size: initConfig.size
+                                    }, '*');
+                                    
+                                    console.log('📤 Fallback ready signal sent');
+                                } catch (e) {
+                                    console.log('⚠️ Could not send ready signal:', e);
+                                }
+                            }
+                            
+                            return Promise.resolve(this);
+                        },
+                        
+                        execute: function(command, params) {
+                            console.log('🔧 Fallback execute:', command, params);
+                            
+                            if (command === 'get-current-context') {
+                                const urlParams = new URLSearchParams(window.location.search);
+                                return Promise.resolve({
+                                    identifier: identifier,
+                                    userId: urlParams.get('userId'),
+                                    companyId: urlParams.get('companyId'),
+                                    apiDomain: 'baymanapllc-sandbox.pipedrive.com',
+                                    person: urlParams.get('selectedIds') ? {
+                                        id: urlParams.get('selectedIds'),
+                                        name: 'Selected Person'
+                                    } : null
+                                });
+                            }
+                            
+                            if (command === 'get-signed-token') {
+                                return Promise.resolve({ token: 'fallback-token' });
+                            }
+                            
+                            if (command === 'show-snackbar') {
+                                console.log('📢 Snackbar:', params.message);
+                                // Показываем alert вместо snackbar в fallback режиме
+                                if (params.message) {
+                                    setTimeout(() => alert('✅ ' + params.message), 100);
+                                }
+                            }
+                            
+                            if (command === 'resize') {
+                                console.log('📐 Fallback resize:', params);
+                            }
+                            
+                            if (command === 'close-modal') {
+                                try {
+                                    if (window.parent !== window) {
+                                        window.parent.postMessage({ type: 'close' }, '*');
+                                    }
+                                    window.close();
+                                } catch (e) {
+                                    console.log('Close failed:', e);
+                                }
+                            }
+                            
+                            return Promise.resolve({ success: true });
+                        }
+                    };
+                };
+                
+                // Устанавливаем fallback
+                window.Pipedrive = { AppExtensionsSDK: window.AppExtensionsSDK };
+                console.log('🔧 Fallback SDK installed and ready');
+            }
+        }, 2000);
+    </script>
+    
+    <!-- Основной JavaScript файл приложения -->
+    <script src="modal-correct.js"></script>
 </body>
 </html>
