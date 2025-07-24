@@ -1,0 +1,9 @@
+=== OAuth Callback 2025-07-24 10:26:03 ===
+GET params: {"code":"14068830.23712931.66bde14dda6ab7d3e4e635dcbe16ba7ffd9ec749"}
+Authorization code received: 14068830.23712931.66...
+Token exchange HTTP code: 200
+Token response: {"access_token":"v1u:AQIBAHj-LzTNK2yuuuaLqifzhWb9crUNKTpk4FlQ9rjnXqp_6AEQhDhDQVa1nvWCHEvnpvSEAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMnG8KNcZLIjEnlRPxAgEQgDsGPIcKjsMU7Qe
+Token exchange successful
+User info HTTP code: 200
+User info retrieved: Alan
+Session saved successfully
