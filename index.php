@@ -357,12 +357,29 @@ function showModal() {
 			// Используем сессионный API токен!
 			$tempUserData = $_SESSION['user'];
 		} else {
+			file_put_contents('index_debug.txt', "No session found, trying file storage\n", FILE_APPEND);
+			
+			$userId = $_GET['userId'] ?? '';
+			$companyId = $_GET['companyId'] ?? '';
+			$userFile = "user_data_{$userId}_{$companyId}.json";
+			
+			if (file_exists($userFile)) {
+				$tempUserData = json_decode(file_get_contents($userFile), true);
+				file_put_contents('index_debug.txt', "Loaded from file: $userFile\n", FILE_APPEND);
+			} else {
+				file_put_contents('index_debug.txt', "File not found: $userFile, using JWT fallback\n", FILE_APPEND);
+				$tempUserData = [
+					'access_token' => $_GET['token'],
+					'api_domain' => 'baymanapllc-sandbox.pipedrive.com'
+				];
+			}
+		} /*else {
 			file_put_contents('index_debug.txt', "No session found, creating fallback\n", FILE_APPEND);
-			$tempUserData = [
+			/*$tempUserData = [
 				'access_token' => $_GET['token'], // Fallback к JWT
 				'api_domain' => 'baymanapllc-sandbox.pipedrive.com'
 			];
-		}
+		}*/
 	} else {
 		file_put_contents('index_debug.txt', "Using session data\n", FILE_APPEND);
 		$tempUserData = $_SESSION['user'];
@@ -420,7 +437,8 @@ function showModal() {
         window.PIPEDRIVE_USER_ID = '" . addslashes($userId) . "';
         window.PIPEDRIVE_COMPANY_ID = '" . addslashes($companyId) . "';
         window.PIPEDRIVE_SELECTED_IDS = '" . addslashes($selectedIds) . "';
-		window.PIPEDRIVE_API_TOKEN = '" . addslashes($realApiToken) . "';
+		//window.PIPEDRIVE_API_TOKEN = '" . addslashes($realApiToken) . "';
+		window.PIPEDRIVE_REAL_API_TOKEN = '" . addslashes($tempUserData['access_token']) . "';
     	console.log('🔑 Pipedrive credentials loaded with identifier:', '" . addslashes($identifier) . "');
     </script>";
     
