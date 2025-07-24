@@ -340,13 +340,102 @@ function showSuccessPage() {
     <?php
 }
 
+
 function showModal() {
-    // Проверяем авторизацию
-    if (!isset($_SESSION['user'])) {
-        die('Authorization required. Please install the app first.');
+	// ОТЛАДКА - добавь в начало функции
+	file_put_contents('index_debug.txt', "=== " . date('Y-m-d H:i:s') . " ===\n", FILE_APPEND);
+	file_put_contents('index_debug.txt', "DEBUG showModal: Called with GET: " . json_encode($_GET) ."\n", FILE_APPEND);
+
+	// Для iframe используем JWT токен от Pipedrive, сессия не нужна
+	if (!empty($_GET['token'])) {
+		file_put_contents('index_debug.txt', "Using JWT token from Pipedrive\n", FILE_APPEND);
+		file_put_contents('index_debug.txt', "Session exists: " . (isset($_SESSION['user']) ? 'YES' : 'NO') . "\n", FILE_APPEND);
+		
+		if (isset($_SESSION['user'])) {
+			file_put_contents('index_debug.txt', "Session user data: " . json_encode($_SESSION['user']) . "\n", FILE_APPEND);
+			
+			// Используем сессионный API токен!
+			$tempUserData = $_SESSION['user'];
+		} else {
+			file_put_contents('index_debug.txt', "No session found, creating fallback\n", FILE_APPEND);
+			$tempUserData = [
+				'access_token' => $_GET['token'], // Fallback к JWT
+				'api_domain' => 'baymanapllc-sandbox.pipedrive.com'
+			];
+		}
+	} else {
+		file_put_contents('index_debug.txt', "Using session data\n", FILE_APPEND);
+		$tempUserData = $_SESSION['user'];
+	}
+	
+	file_put_contents('index_debug.txt', "Final tempUserData: " . json_encode($tempUserData) . "\n", FILE_APPEND);
+
+    // ПОЛУЧАЕМ ПАРАМЕТРЫ ОТ PIPEDRIVE
+    $identifier = $_GET['id'] ?? 'unknown';
+    $userId = $_GET['userId'] ?? '';
+    $companyId = $_GET['companyId'] ?? '';
+    $selectedIds = $_GET['selectedIds'] ?? '';
+    $jwtToken = $_GET['token'] ?? ''; // JWT от Pipedrive
+
+	// ОТЛАДКА - проверяем параметры
+	file_put_contents('index_debug.txt', "DEBUG: identifier=$identifier, userId=$userId, companyId=$companyId" ."\n", FILE_APPEND);
+
+	// JWT токен только для передачи, API токен всегда из сессии
+	$accessToken = $jwtToken; // Для передачи в JS
+	$realApiToken = $tempUserData['access_token']; // Реальный API токен
+	$apiDomain = $tempUserData['api_domain'];
+    $version = time();
+
+	// ОТЛАДКА - проверяем файл
+    if (!file_exists('modal.html')) {
+		file_put_contents('index_debug.txt', "ERROR: modal.html not found!" ."\n", FILE_APPEND);
+        die('modal.html file not found');
     }
+
+    $modalContent = file_get_contents('modal.html');
+
+	// ОТЛАДКА - проверяем содержимое
+    if ($modalContent === false) {
+		file_put_contents('index_debug.txt', "ERROR: Could not read modal.html" ."\n", FILE_APPEND);
+        die('Could not read modal.html');
+    }
+	file_put_contents('index_debug.txt', "DEBUG: modal.html size: " . strlen($modalContent) . " bytes" ."\n", FILE_APPEND);
+
+    // Cache busting
+    $modalContent = str_replace(
+        'src="modal.js"', 
+        'src="modal.js?v=' . $version . '"', 
+        $modalContent
+    );
+
+	// ОТЛАДКА - проверяем что заменилось
+	file_put_contents('index_debug.txt', "After modal.js replacement, looking for: src=\"modal.js?v=" . $version . "\"\n", FILE_APPEND);
     
-    include 'modal.html';
+    // ПЕРЕДАЕМ ВСЕ ДАННЫЕ В JAVASCRIPT
+    $tokenScript = "
+    <script>
+        window.PIPEDRIVE_TOKEN = '" . addslashes($accessToken) . "';
+        window.PIPEDRIVE_DOMAIN = '" . addslashes($apiDomain) . "';
+        window.PIPEDRIVE_IDENTIFIER = '" . addslashes($identifier) . "';
+        window.PIPEDRIVE_USER_ID = '" . addslashes($userId) . "';
+        window.PIPEDRIVE_COMPANY_ID = '" . addslashes($companyId) . "';
+        window.PIPEDRIVE_SELECTED_IDS = '" . addslashes($selectedIds) . "';
+		window.PIPEDRIVE_API_TOKEN = '" . addslashes($realApiToken) . "';
+    	console.log('🔑 Pipedrive credentials loaded with identifier:', '" . addslashes($identifier) . "');
+    </script>";
+    
+    $modalContent = str_replace('</head>', $tokenScript . '</head>', $modalContent);
+
+	// Простая замена без сложных манипуляций
+	//$modalContent = str_replace('modal.js', 'modal.js?v=' . $version, $modalContent);
+	//$modalContent = str_replace('</head>', $tokenScript . '</head>', $modalContent);
+
+	// ОТЛАДКА - проверяем итоговый HTML (первые 500 символов)
+	//file_put_contents('index_debug.txt', "Final HTML preview: " . substr($modalContent, 0, 500) . "...\n", FILE_APPEND);
+	// ОТЛАДКА - проверяем итоговый размер
+	file_put_contents('index_debug.txt', "DEBUG: Final content size: " . strlen($modalContent) . " bytes" ."\n", FILE_APPEND);
+
+    echo $modalContent;
 }
 
 function handleUninstall() {
@@ -413,5 +502,6 @@ function handleUninstall() {
     </body>
     </html>
     <?php
+	file_put_contents('index_debug.txt', "=== END ===\n\n", FILE_APPEND);
 }
 ?>
