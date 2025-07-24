@@ -10,7 +10,7 @@
     Header set Access-Control-Allow-Origin "*"
     Header set Access-Control-Allow-Methods "GET, POST, OPTIONS"
     Header set Access-Control-Allow-Headers "Content-Type, Authorization"
-    
+
     # Отключаем кеширование для модального окна
     Header set Cache-Control "no-cache, no-store, must-revalidate"
     Header set Pragma "no-cache"
@@ -18,7 +18,7 @@
 </Files>
 
 # Разрешаем для тестового модального окна тоже
-<Files "modal-correct-sdk.html">
+<Files "test-iframe.html">
     Header unset X-Frame-Options
     Header set Content-Security-Policy "frame-ancestors 'self' *.pipedrive.com pipedrive.com https://*.pipedrive.com https://pipedrive.com"
     Header set Access-Control-Allow-Origin "*"
@@ -48,3 +48,11 @@
 <IfModule !mod_headers.c>
     LoadModule headers_module modules/mod_headers.so
 </IfModule>
+
+# Разрешаем iframe для modal через index.php
+<If "%{QUERY_STRING} =~ /action=modal/">
+     Header unset X-Frame-Options
+     Header set Content-Security-Policy "frame-ancestors 'self' *.pipedrive.com pipedrive.com https://*.pipedrive.com https://pipedrive.com"
+     Header set Access-Control-Allow-Origin "*"
+     Header set Cache-Control "no-cache, no-store, must-revalidate"
+</If>
