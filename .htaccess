@@ -1,0 +1,50 @@
+# Разрешаем загрузку модальных окон в iframe от Pipedrive
+<Files "modal.html">
+    # Удаляем X-Frame-Options
+    Header unset X-Frame-Options
+    
+    # Устанавливаем Content-Security-Policy для разрешения iframe от Pipedrive
+    Header set Content-Security-Policy "frame-ancestors 'self' *.pipedrive.com pipedrive.com https://*.pipedrive.com https://pipedrive.com"
+    
+    # CORS заголовки 
+    Header set Access-Control-Allow-Origin "*"
+    Header set Access-Control-Allow-Methods "GET, POST, OPTIONS"
+    Header set Access-Control-Allow-Headers "Content-Type, Authorization"
+    
+    # Отключаем кеширование для модального окна
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+</Files>
+
+# Разрешаем для тестового модального окна тоже
+<Files "modal-correct-sdk.html">
+    Header unset X-Frame-Options
+    Header set Content-Security-Policy "frame-ancestors 'self' *.pipedrive.com pipedrive.com https://*.pipedrive.com https://pipedrive.com"
+    Header set Access-Control-Allow-Origin "*"
+</Files>
+
+# Разрешаем загрузку JavaScript файлов
+<Files "modal.js">
+    Header set Access-Control-Allow-Origin "*"
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+</Files>
+
+# Разрешаем API запросы
+<Files "api.php">
+    Header set Access-Control-Allow-Origin "*"
+    Header set Access-Control-Allow-Methods "GET, POST, OPTIONS"
+    Header set Access-Control-Allow-Headers "Content-Type, Authorization"
+</Files>
+
+# Безопасность: оставляем X-Frame-Options для всех остальных файлов
+<FilesMatch "\.(php|html)$">
+    <If "%{REQUEST_URI} !~ /modal.*\.html$/">
+        Header set X-Frame-Options "SAMEORIGIN"
+    </If>
+</FilesMatch>
+
+# Включаем mod_headers если не включен
+<IfModule !mod_headers.c>
+    LoadModule headers_module modules/mod_headers.so
+</IfModule>
