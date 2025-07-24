@@ -2,6 +2,13 @@
 let sdk;
 let currentContext = {};
 let authToken = null;
+// Получаем токен из глобальной переменной
+if (window.PIPEDRIVE_TOKEN) {
+    authToken = window.PIPEDRIVE_TOKEN;
+    console.log('🔑 Token loaded from window:', authToken.substring(0, 20) + '...');
+} else {
+    console.log('🔑 NO TOKEN in window.PIPEDRIVE_TOKEN!');
+}
 
 // Initialize the Pipedrive App Extensions SDK
 document.addEventListener('DOMContentLoaded', async function() {
@@ -10,13 +17,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // Получаем identifier из URL (НЕ action_id!)
         const urlParams = new URLSearchParams(window.location.search);
-        const identifier = urlParams.get('id');
-        const userId = urlParams.get('userId');
-        const companyId = urlParams.get('companyId');
+		const identifier = window.PIPEDRIVE_IDENTIFIER || urlParams.get('id');
+		const userId = window.PIPEDRIVE_USER_ID || urlParams.get('userId');
+		const companyId = window.PIPEDRIVE_COMPANY_ID || urlParams.get('companyId');
         
         console.log('🆔 Identifier from URL:', identifier);
         console.log('👤 User ID:', userId);
         console.log('🏢 Company ID:', companyId);
+
         
         if (!identifier) {
             throw new Error('No identifier found in URL parameters - this means the modal was not opened correctly from Pipedrive');
@@ -25,95 +33,40 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Ждем загрузки SDK
         await waitForRealSDK();
         
-        // Выбираем доступный SDK
-        const SDKConstructor = window.Pipedrive?.AppExtensionsSDK || window.AppExtensionsSDK;
+        // Используем глобальный AppExtensionsSDK
+		if (!window.AppExtensionsSDK) {
+			throw new Error('AppExtensionsSDK not loaded');
+		}
+		
+		// Простая инициализация
+		sdk = await new AppExtensionsSDK().initialize({
+			size: {
+				height: 800,
+				width: 800
+			}
+		});
+		
+		console.log('✅ SDK initialized successfully');
         
-        if (!SDKConstructor) {
-            // Создаем emergency fallback SDK
-            console.warn('🆘 No SDK available, creating emergency fallback');
-            
-            sdk = {
-                execute: function(command, params) {
-                    console.log('🆘 Emergency SDK execute:', command, params);
-                    
-                    if (command === 'get-current-context') {
-                        return Promise.resolve({
-                            identifier: identifier,
-                            userId: userId,
-                            companyId: companyId,
-                            api_domain: 'baymanapllc-sandbox.pipedrive.com',
-                            person: urlParams.get('selectedIds') ? {
-                                id: urlParams.get('selectedIds'),
-                                name: 'Selected Person'
-                            } : null
-                        });
-                    }
-                    
-                    if (command === 'get-signed-token') {
-                        return Promise.resolve({ token: 'emergency-token' });
-                    }
-                    
-                    return Promise.resolve({ success: true });
-                }
-            };
-            
-            // Уведомляем Pipedrive что готовы
-            if (window.parent !== window) {
-                try {
-                    window.parent.postMessage({
-                        type: 'pipedriveAppExtensionReady',
-                        identifier: identifier
-                    }, '*');
-                    console.log('🆘 Emergency ready signal sent');
-                } catch (e) {
-                    console.log('🆘 Emergency signal failed:', e);
-                }
-            }
-        } else {
-            // ПРАВИЛЬНАЯ инициализация SDK
-            console.log('📡 Initializing SDK with identifier:', identifier);
-            
-            try {
-                // Способ 1: Автоматическое чтение identifier из URL
-                sdk = await new SDKConstructor().initialize({
-                    size: {
-                        height: 650,
-                        width: 800
-                    }
-                });
-                console.log('✅ SDK initialized successfully (auto-detect method)');
-                
-            } catch (autoError) {
-                console.warn('⚠️ Auto-detect failed, trying manual identifier:', autoError.message);
-                
-                // Способ 2: Ручная передача identifier
-                sdk = await new SDKConstructor({
-                    identifier: identifier
-                }).initialize({
-                    size: {
-                        height: 650,
-                        width: 800
-                    }
-                });
-                console.log('✅ SDK initialized successfully (manual method)');
-            }
-        }
-        
-        console.log('✅ Pipedrive App Extensions SDK initialized successfully');
-        
-        // Get signed token
-        try {
-            const tokenData = await sdk.execute('get-signed-token');
-            authToken = tokenData.token;
-            console.log('🔑 JWT token received successfully');
-        } catch (tokenError) {
-            console.warn('⚠️ Could not get JWT token:', tokenError.message);
-            authToken = 'session-based';
-        }
+		// Get signed token
+		try {
+			const tokenData = await sdk.execute('GET_SIGNED_TOKEN');
+			authToken = tokenData.token;
+			console.log('🔑 JWT token received from SDK successfully');
+		} catch (tokenError) {
+			console.warn('⚠️ Could not get JWT token from SDK, using window token:', tokenError.message);
+			// Используем токен из window если SDK не работает
+			if (window.PIPEDRIVE_TOKEN) {
+				authToken = window.PIPEDRIVE_TOKEN;
+				console.log('🔑 Using JWT token from window');
+			} else {
+				authToken = 'session-based';
+			}
+		}
         
         // Get current context
         try {
-            currentContext = await sdk.execute('get-current-context') || {};
+			currentContext = await sdk.execute('GET_CURRENT_CONTEXT') || {};
             console.log('📋 Current context received:', currentContext);
             
             // Дополнительно извлекаем данные из URL если контекст пустой
@@ -180,19 +133,16 @@ document.addEventListener('DOMContentLoaded', async function() {
 function waitForRealSDK() {
     return new Promise((resolve, reject) => {
         let attempts = 0;
-        const maxAttempts = 15; // 3 seconds total (15 * 200ms)
+        const maxAttempts = 50; // 10 секунд как у Pipedrive
         
         const checkSDK = () => {
             attempts++;
             
-            // Проверяем оба варианта SDK
-            if ((window.Pipedrive && window.Pipedrive.AppExtensionsSDK) || window.AppExtensionsSDK) {
-                const sdkType = window.Pipedrive?.AppExtensionsSDK ? 'Official Pipedrive SDK' : 'Fallback SDK';
-                console.log(`✅ ${sdkType} available after ${attempts * 200}ms`);
+            if (window.AppExtensionsSDK) {
+                console.log(`✅ AppExtensionsSDK loaded after ${attempts * 200}ms`);
                 resolve();
             } else if (attempts >= maxAttempts) {
-                console.log('⏰ SDK loading timeout - will use emergency fallback');
-                resolve(); // Не reject, а resolve - будем использовать emergency fallback
+                reject(new Error('SDK failed to load within 10 seconds'));
             } else {
                 setTimeout(checkSDK, 200);
             }
@@ -384,6 +334,12 @@ async function handleFormSubmission(e) {
     e.preventDefault();
     
     console.log('🔥 FORM SUBMISSION STARTED');
+
+	// ДОБАВЬ ЭТУ ОТЛАДКУ В НАЧАЛО!
+    console.log('🔑 Current authToken:', authToken);
+    console.log('🔑 window.PIPEDRIVE_TOKEN:', window.PIPEDRIVE_TOKEN ? window.PIPEDRIVE_TOKEN.substring(0, 20) + '...' : 'NOT SET');
+    console.log('🔑 authToken type:', typeof authToken);
+    console.log('🔑 authToken === session-based:', authToken === 'session-based');
     
     const submitBtn = document.getElementById('submitBtn');
     const loading = document.getElementById('loading');
@@ -423,6 +379,13 @@ async function handleFormSubmission(e) {
         if (currentContext.identifier) {
             jobData.pipedrive_identifier = currentContext.identifier;
         }
+
+		// Передаем реальный API токен
+		if (window.PIPEDRIVE_REAL_API_TOKEN) {
+			jobData.pipedrive_api_token = window.PIPEDRIVE_REAL_API_TOKEN;
+		} else if (window.PIPEDRIVE_API_TOKEN) {
+			jobData.pipedrive_api_token = window.PIPEDRIVE_API_TOKEN;
+		}
         
         console.log('📝 Form data collected:', jobData);
         
@@ -438,6 +401,14 @@ async function handleFormSubmission(e) {
             },
             body: JSON.stringify(jobData)
         });
+
+		// Отладка headers
+		console.log('📤 Request headers:', {
+			'Content-Type': 'application/json',
+			...(authToken && authToken !== 'session-based' ? {
+				'Authorization': `Bearer ${authToken.substring(0, 20)}...`
+			} : {})
+		});
         
         console.log('📥 API Response status:', response.status);
         
@@ -501,7 +472,7 @@ async function handleFormSubmission(e) {
         // Show error snackbar in Pipedrive
         if (sdk) {
             try {
-                await sdk.execute('show-snackbar', {
+                await sdk.execute('SHOW_SNACKBAR', {
                     message: `Error creating job: ${error.message}`
                 });
             } catch (snackbarError) {
@@ -610,7 +581,7 @@ function handleCancel() {
         if (sdk) {
             // Close the modal using SDK
             console.log('🚪 Closing modal via SDK');
-            sdk.execute('close-modal');
+            sdk.execute('CLOSE_MODAL');
         } else {
             // Fallback for testing outside Pipedrive
             console.log('🚪 Closing modal via window.close()');
@@ -621,6 +592,34 @@ function handleCancel() {
         window.close();
     }
 }
+
+// Получаем реальный API токен из основной сессии
+async function getRealApiToken() {
+    try {
+        const response = await fetch('get-api-token.php');
+        const data = await response.json();
+        
+        if (data.success) {
+            window.PIPEDRIVE_REAL_API_TOKEN = data.api_token;
+            console.log('🔑 Real API token loaded from session');
+            return data.api_token;
+        } else {
+            console.warn('⚠️ Could not get real API token:', data.error);
+            return null;
+        }
+    } catch (error) {
+        console.warn('⚠️ Error getting real API token:', error);
+        return null;
+    }
+}
+
+// Вызываем при загрузке
+document.addEventListener('DOMContentLoaded', async function() {
+    // Получаем реальный API токен
+    await getRealApiToken();
+    
+    // ... остальной код инициализации
+});
 
 // Error handler for unhandled promise rejections
 window.addEventListener('unhandledrejection', function(event) {
