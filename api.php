@@ -22,7 +22,7 @@ try {
 // Пробуем получить данные из разных источников
 $user = null;
 $apiToken = null;
-
+	/*
 // Способ 1: Из сессии (если доступна)
 if (isset($_SESSION['user']) && isset($_SESSION['user']['access_token'])) {
     $user = $_SESSION['user'];
@@ -70,15 +70,38 @@ elseif (function_exists('getallheaders')) {
 } else {
     file_put_contents('api_debug.txt', "No auth method available\n", FILE_APPEND);
     throw new Exception('User not authenticated. No token provided.');
+}*/
+// Проверяем сессию - главный источник API токена
+/*if (!isset($_SESSION['user']) || !isset($_SESSION['user']['access_token'])) {
+    throw new Exception('User not authenticated. Please setup API credentials first.');
 }
 
+$user = $_SESSION['user'];
+$apiToken = $user['access_token'];  // Это настоящий API токен из OAuth
+$apiDomain = $user['api_domain'] ?? '';
 if (!$apiToken) {
     throw new Exception('No API token available');
 }
-    
+*/
+// Получаем API токен из тела запроса (для iframe)
+if (isset($data['pipedrive_api_token'])) {
+    $apiToken = $data['pipedrive_api_token'];
+    $apiDomain = 'baymanapllc-sandbox.pipedrive.com';
+    file_put_contents('api_debug.txt', "Using API token from request body\n", FILE_APPEND);
+} elseif (isset($_SESSION['user']) && isset($_SESSION['user']['access_token'])) {
     $user = $_SESSION['user'];
     $apiToken = $user['access_token'];
     $apiDomain = $user['api_domain'] ?? '';
+    file_put_contents('api_debug.txt', "Using API token from session\n", FILE_APPEND);
+} else {
+    throw new Exception('User not authenticated. No API token provided.');
+}
+    
+	//$user = $_SESSION['user'];
+	//$apiToken = $user['access_token'];
+	//$apiDomain = $user['api_domain'] ?? '';
+	$apiDomain = $user['api_domain'] ?? 'baymanapllc-sandbox.pipedrive.com';
+	file_put_contents('api_debug.txt', "API Domain set to: $apiDomain\n", FILE_APPEND);
     
     file_put_contents('api_debug.txt', "API Domain: " . $apiDomain . "\n", FILE_APPEND);
     file_put_contents('api_debug.txt', "API Token: " . substr($apiToken, 0, 10) . "...\n", FILE_APPEND);
@@ -90,7 +113,8 @@ if (!$apiToken) {
     
     // Тестируем API подключение с file_get_contents
     file_put_contents('api_debug.txt', "Testing API connection...\n", FILE_APPEND);
-    $testResponse = makePipedriveRequest('GET', 'users/me', null, $apiToken);
+	//$testResponse = makePipedriveRequest('GET', 'users/me', null, $apiToken);
+	$testResponse = makePipedriveRequest('GET', 'users/me', null, $apiToken, $apiDomain);
     file_put_contents('api_debug.txt', "API Test Response: " . json_encode($testResponse) . "\n", FILE_APPEND);
     
     if (!$testResponse || !isset($testResponse['success']) || !$testResponse['success']) {
@@ -102,12 +126,12 @@ if (!$apiToken) {
     
     // 1. Создаем персону
     file_put_contents('api_debug.txt', "Creating person...\n", FILE_APPEND);
-    $personData = createPersonSimple($data, $apiToken);
+    $personData = createPersonSimple($data, $apiToken, $apiDomain);
     file_put_contents('api_debug.txt', "Person created: " . json_encode($personData) . "\n", FILE_APPEND);
     
     // 2. Создаем сделку
     file_put_contents('api_debug.txt', "Creating deal...\n", FILE_APPEND);
-    $dealData = createDeal($data, $personData['id'], $apiToken);
+    $dealData = createDeal($data, $personData['id'], $apiToken, $apiDomain);
     file_put_contents('api_debug.txt', "Deal created: " . json_encode($dealData) . "\n", FILE_APPEND);
     
     // Успешный ответ
@@ -149,7 +173,7 @@ file_put_contents('api_debug.txt', "=== END ===\n\n", FILE_APPEND);
 /**
  * Создает персону
  */
-function createPersonSimple($data, $apiToken) {
+function createPersonSimple($data, $apiToken, $apiDomain = '') {
     $firstName = trim($data['firstName'] ?? '');
     $lastName = trim($data['lastName'] ?? '');
     $fullName = trim($firstName . ' ' . $lastName);
@@ -170,19 +194,23 @@ function createPersonSimple($data, $apiToken) {
     
     file_put_contents('api_debug.txt', "Person data: " . json_encode($personData) . "\n", FILE_APPEND);
     
-    $response = makePipedriveRequest('POST', 'persons', $personData, $apiToken);
+	//$response = makePipedriveRequest('POST', 'persons', $personData, $apiToken);
+	$response = makePipedriveRequest('POST', 'persons', $personData, $apiToken, $apiDomain);
     
     if (!$response || !isset($response['success']) || !$response['success']) {
         throw new Exception('Failed to create person: ' . json_encode($response));
     }
     
-    return $response['data'];
+	//return $response['data'];
+	// Берем первую персону из массива (если API возвращает существующую)
+	$personData = is_array($response['data']) ? $response['data'][0] : $response['data'];
+	return $personData;
 }
 
 /**
  * Создает сделку
  */
-function createDeal($data, $personId, $apiToken) {
+function createDeal($data, $personId, $apiToken, $apiDomain = '') {
     $serviceNeeded = $data['serviceNeeded'] ?? 'Service';
     $firstName = $data['firstName'] ?? 'Client';
     $jobDescription = $data['jobDescription'] ?? '';
@@ -201,7 +229,8 @@ function createDeal($data, $personId, $apiToken) {
     file_put_contents('api_debug.txt', "Deal data: " . json_encode($dealData) . "\n", FILE_APPEND);
     
     // Создаем сделку
-    $response = makePipedriveRequest('POST', 'deals', $dealData, $apiToken);
+	//$response = makePipedriveRequest('POST', 'deals', $dealData, $apiToken);
+	$response = makePipedriveRequest('POST', 'deals', $dealData, $apiToken, $apiDomain);
     
     if (!$response || !isset($response['success']) || !$response['success']) {
         throw new Exception('Failed to create deal: ' . json_encode($response));
@@ -232,7 +261,7 @@ function createDeal($data, $personId, $apiToken) {
                 'deal_id' => $dealId
             ];
             file_put_contents('api_debug.txt', "Adding note: " . json_encode($noteData) . "\n", FILE_APPEND);
-            makePipedriveRequest('POST', 'notes', $noteData, $apiToken);
+            makePipedriveRequest('POST', 'notes', $noteData, $apiToken, $apiDomain);
         } catch (Exception $e) {
             file_put_contents('api_debug.txt', "Note creation failed (non-critical): " . $e->getMessage() . "\n", FILE_APPEND);
             // Не падаем если заметка не создалась - сделка уже создана
@@ -259,24 +288,62 @@ function formatAddress($data) {
 /**
  * Выполняет запрос к Pipedrive API БЕЗ cURL
  */
-function makePipedriveRequest($method, $endpoint, $data = null, $apiToken = null) {
-    $baseUrl = 'https://api.pipedrive.com/v1';
+//function makePipedriveRequest($method, $endpoint, $data = null, $apiToken = null) {
+	//    $baseUrl = 'https://api.pipedrive.com/v1';
+function makePipedriveRequest($method, $endpoint, $data = null, $apiToken = null, $apiDomain = '') {
+    // Для sandbox используем company-specific URL
+    if (strpos($apiDomain, 'sandbox') !== false) {
+		// Если domain уже содержит .pipedrive.com, не добавляем повторно
+		if (strpos($apiDomain, '.pipedrive.com') !== false) {
+			$baseUrl = "https://{$apiDomain}/api/v1";
+		} else {
+			$baseUrl = "https://{$apiDomain}.pipedrive.com/api/v1";
+		}
+	} else {
+		$baseUrl = 'https://api.pipedrive.com/v1';
+	}
     $url = "{$baseUrl}/{$endpoint}";
     
     // Добавляем API токен в URL
-    $separator = strpos($url, '?') !== false ? '&' : '?';
-    $url .= $separator . 'api_token=' . urlencode($apiToken);
+	//$separator = strpos($url, '?') !== false ? '&' : '?';
+	//$url .= $separator . 'api_token=' . urlencode($apiToken);
+	// Для sandbox используем Bearer auth, для production - URL параметр
+	$useBearer = strpos($apiDomain, 'sandbox') !== false;
+	
+	if (!$useBearer) {
+		// Production: добавляем токен в URL
+		$separator = strpos($url, '?') !== false ? '&' : '?';
+		$url .= $separator . 'api_token=' . urlencode($apiToken);
+	}
     
     file_put_contents('api_debug.txt', "Making {$method} request to: {$url}\n", FILE_APPEND);
     
     // Настройки для file_get_contents
-    $options = [
+	/*$options = [
         'http' => [
             'method' => $method,
             'header' => [
                 'Accept: application/json',
                 'User-Agent: Workiz Job Creator 1.0'
-            ],
+			],*/
+	$headers = [
+		'Accept: application/json',
+		'User-Agent: Workiz Job Creator 1.0'
+	];
+	
+	// Для sandbox добавляем Bearer токен
+	if ($useBearer) {
+		$headers[] = 'Authorization: Bearer ' . $apiToken;
+	}
+
+	file_put_contents('api_debug.txt', "Making $method request to: $url\n", FILE_APPEND);
+	file_put_contents('api_debug.txt', "Method check: method='$method', has_data=" . ($data ? 'yes' : 'no') . "\n", FILE_APPEND);
+	file_put_contents('api_debug.txt', "Method === 'POST': " . ($method === 'POST' ? 'true' : 'false') . "\n", FILE_APPEND);
+
+	$options = [
+		'http' => [
+			'method' => $method,
+			'header' => $headers,
             'timeout' => 30,
             'ignore_errors' => true
         ],
@@ -330,7 +397,7 @@ function makePipedriveRequest($method, $endpoint, $data = null, $apiToken = null
     }
     
     file_put_contents('api_debug.txt', "Parsed Response: " . json_encode($responseData) . "\n", FILE_APPEND);
-    
+
     if ($httpCode >= 400) {
         $errorMessage = isset($responseData['error']) ? $responseData['error'] : "HTTP {$httpCode}";
         throw new Exception("Pipedrive API error: {$errorMessage}");
