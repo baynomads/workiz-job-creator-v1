@@ -8,27 +8,33 @@ document.addEventListener('DOMContentLoaded', async function() {
     try {
         console.log('🚀 Initializing Pipedrive App Extensions SDK...');
         
-        // Initialize SDK
+        // Initialize SDK with proper configuration
         sdk = new window.Pipedrive.AppExtensionsSDK();
+        
+        // ВАЖНО: Добавляем правильную инициализацию
         await sdk.initialize({
             size: {
                 height: 650,
                 width: 800
-            }
+            },
+            // Указываем ID модального окна из Developer Hub (замените на ваш реальный ID)
+            // Этот ID можно найти в Developer Hub -> App extensions -> Custom modal
+            action_id: '0c943aae-4f11-477e-bf7b-d244e31298b7' // Раскомментируйте и добавьте ваш ID
         });
         
         console.log('✅ Pipedrive App Extensions SDK initialized successfully');
         
-        // Get signed token (optional for PHP version)
+        // Get signed token 
         try {
             const tokenData = await sdk.execute('get-signed-token');
             authToken = tokenData.token;
+            console.log('🔑 JWT token received');
         } catch (tokenError) {
-            console.warn('⚠️ Could not get JWT token:', tokenError);
-            authToken = 'session-based'; // PHP uses sessions
+            console.warn('⚠️ Could not get JWT token (using PHP sessions):', tokenError);
+            authToken = 'session-based';
         }
         
-        // Get current context (deal, person, etc.)
+        // Get current context
         try {
             currentContext = await sdk.execute('get-current-context') || {};
             console.log('📋 Current context:', currentContext);
@@ -43,15 +49,20 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Update UI to show connection status
         updateConnectionStatus(true);
         
+        // Notify Pipedrive that modal is ready
+        try {
+            await sdk.execute('resize', { height: 650, width: 800 });
+            console.log('📐 Modal resized successfully');
+        } catch (resizeError) {
+            console.warn('⚠️ Could not resize modal:', resizeError);
+        }
+        
     } catch (error) {
         console.error('❌ Failed to initialize Pipedrive App Extensions SDK:', error);
         updateConnectionStatus(false);
         
-        // Fallback: PHP version uses sessions
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            console.log('🔧 Development mode detected, using PHP sessions');
-            authToken = 'session-based';
-        }
+        // Fallback: Show error message
+        showInitializationError(error);
     }
     
     // Set minimum date to today
@@ -61,42 +72,84 @@ document.addEventListener('DOMContentLoaded', async function() {
     initializeEventListeners();
 });
 
+// Show initialization error
+function showInitializationError(error) {
+    const statusDiv = document.getElementById('statusInfo');
+    statusDiv.innerHTML = `
+        ❌ <strong>Initialization Error:</strong> ${error.message}<br>
+        <small>Please check Developer Hub configuration and app installation.</small>
+    `;
+    statusDiv.style.background = '#fed7d7';
+    statusDiv.style.borderColor = '#feb2b2';
+    statusDiv.style.color = '#c53030';
+}
+
 // Pre-fill form based on current Pipedrive context
 function prefillFormFromContext() {
     if (!currentContext) return;
     
     try {
+        console.log('🔍 Pre-filling form from context...', currentContext);
+        
         // If we're in a person context, pre-fill client details
         if (currentContext.person) {
             const person = currentContext.person;
-            console.log('👤 Pre-filling from person:', person);
+            console.log('👤 Pre-filling from person:', person.name);
             
             if (person.name) {
                 const nameParts = person.name.split(' ');
-                document.getElementById('firstName').value = nameParts[0] || '';
-                document.getElementById('lastName').value = nameParts.slice(1).join(' ') || '';
+                if (nameParts.length > 0) {
+                    document.getElementById('firstName').value = nameParts[0] || '';
+                    document.getElementById('lastName').value = nameParts.slice(1).join(' ') || '';
+                }
             }
             
-            if (person.phone && person.phone.length > 0) {
+            // Fill phone - handle different formats
+            if (person.phone && Array.isArray(person.phone) && person.phone.length > 0) {
                 document.getElementById('phone').value = person.phone[0].value || '';
+            } else if (person.phone && typeof person.phone === 'string') {
+                document.getElementById('phone').value = person.phone;
             }
             
-            if (person.email && person.email.length > 0) {
+            // Fill email - handle different formats  
+            if (person.email && Array.isArray(person.email) && person.email.length > 0) {
                 document.getElementById('email').value = person.email[0].value || '';
+            } else if (person.email && typeof person.email === 'string') {
+                document.getElementById('email').value = person.email;
             }
         }
         
-        // If we're in a deal context, we might pre-fill some job details
+        // If we're in a deal context, pre-fill some job details
         if (currentContext.deal) {
-            console.log('💼 Deal context available:', currentContext.deal);
+            console.log('💼 Deal context available:', currentContext.deal.title);
+            
+            // Try to extract service type from deal title
+            const dealTitle = currentContext.deal.title || '';
+            const serviceTypes = ['plumbing', 'electrical', 'hvac', 'repair', 'maintenance', 'installation'];
+            
+            for (const service of serviceTypes) {
+                if (dealTitle.toLowerCase().includes(service)) {
+                    const serviceSelect = document.getElementById('serviceNeeded');
+                    const capitalizedService = service.charAt(0).toUpperCase() + service.slice(1);
+                    
+                    // Find and select the matching option
+                    for (const option of serviceSelect.options) {
+                        if (option.value.toLowerCase() === capitalizedService.toLowerCase()) {
+                            option.selected = true;
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
         }
         
         // If we're in an organization context, pre-fill address
-        if (currentContext.organization) {
-            if (currentContext.organization.address) {
-                document.getElementById('address').value = currentContext.organization.address || '';
-            }
+        if (currentContext.organization && currentContext.organization.address) {
+            document.getElementById('address').value = currentContext.organization.address || '';
         }
+        
+        console.log('✅ Form pre-filled successfully');
         
     } catch (error) {
         console.error('⚠️ Error pre-filling form:', error);
@@ -108,12 +161,18 @@ function updateConnectionStatus(connected) {
     const statusDiv = document.getElementById('statusInfo');
     
     if (connected) {
-        statusDiv.innerHTML = '📋 <strong>Pipedrive Integration Active</strong> - This job will be created as a new deal in your pipeline.';
+        statusDiv.innerHTML = `
+            📋 <strong>Pipedrive Integration Active</strong> - Connected to ${currentContext.api_domain || 'Pipedrive'}<br>
+            <small>This job will be created as a new deal in your pipeline.</small>
+        `;
         statusDiv.style.background = '#ebf4ff';
         statusDiv.style.borderColor = '#bee3f8';
         statusDiv.style.color = '#2b6cb0';
     } else {
-        statusDiv.innerHTML = '⚠️ <strong>Pipedrive Connection Issue</strong> - Please check your app configuration.';
+        statusDiv.innerHTML = `
+            ⚠️ <strong>Pipedrive Connection Issue</strong><br>
+            <small>Please check your app configuration in Developer Hub.</small>
+        `;
         statusDiv.style.background = '#fed7d7';
         statusDiv.style.borderColor = '#feb2b2';
         statusDiv.style.color = '#c53030';
@@ -140,6 +199,8 @@ function initializeEventListeners() {
     
     // Time validation
     document.getElementById('endTime').addEventListener('change', validateTimeRange);
+    
+    console.log('🎯 Event listeners initialized');
 }
 
 // Handle form submission
@@ -173,36 +234,44 @@ async function handleFormSubmission(e) {
         const formData = new FormData(document.getElementById('jobForm'));
         const jobData = Object.fromEntries(formData.entries());
         
+        // Add context data if available
+        if (currentContext.person) {
+            jobData.pipedrive_person_id = currentContext.person.id;
+        }
+        if (currentContext.deal) {
+            jobData.pipedrive_deal_id = currentContext.deal.id;
+        }
+        if (currentContext.organization) {
+            jobData.pipedrive_org_id = currentContext.organization.id;
+        }
+        
         console.log('📝 Form data collected:', jobData);
         
-        // 🔍 ОТЛАДКА: Проверяем данные перед отправкой
-        console.log('📤 Sending data to API:', JSON.stringify(jobData));
-        
-        // Send to our PHP API
+        // Send to PHP API
         console.log('🚀 Making API request to api.php...');
         const response = await fetch('api.php', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                // Передаем JWT токен если есть
+                ...(authToken && authToken !== 'session-based' ? {
+                    'Authorization': `Bearer ${authToken}`
+                } : {})
             },
             body: JSON.stringify(jobData)
         });
         
         console.log('📥 API Response status:', response.status);
-        console.log('📥 API Response headers:', response.headers);
         
-        // 🔍 ОТЛАДКА: Смотрим сырой ответ
         const responseText = await response.text();
         console.log('📄 Raw API response:', responseText);
         
-        // Пытаемся парсить JSON
         let result;
         try {
             result = JSON.parse(responseText);
             console.log('✅ Parsed JSON result:', result);
         } catch (parseError) {
             console.error('❌ JSON Parse Error:', parseError);
-            console.error('❌ Response text that failed to parse:', responseText);
             throw new Error('Invalid JSON response from server: ' + responseText.substring(0, 100));
         }
         
@@ -210,17 +279,22 @@ async function handleFormSubmission(e) {
             console.log('✅ SUCCESS! Job created:', result.data);
             
             // Show success message
+            successMessage.innerHTML = `
+                ✅ <strong>Job Created Successfully!</strong><br>
+                Deal: ${result.data.deal_title}<br>
+                <small>Deal ID: ${result.data.deal_id}</small>
+            `;
             successMessage.style.display = 'block';
             
             // Show snackbar in Pipedrive
             if (sdk) {
                 try {
                     await sdk.execute('show-snackbar', {
-                        message: 'Job created successfully!',
-                        link: {
-                            url: result.data.pipedrive_url || `https://${currentContext.api_domain || 'app.pipedrive.com'}/deal/${result.data.deal_id}`,
+                        message: `Job "${result.data.deal_title}" created successfully!`,
+                        link: result.data.pipedrive_url ? {
+                            url: result.data.pipedrive_url,
                             label: 'View Deal'
-                        }
+                        } : undefined
                     });
                 } catch (snackbarError) {
                     console.warn('⚠️ Could not show snackbar:', snackbarError);
@@ -230,10 +304,10 @@ async function handleFormSubmission(e) {
             // Clear form
             document.getElementById('jobForm').reset();
             
-            // Close modal after 2 seconds
+            // Close modal after 3 seconds
             setTimeout(() => {
                 handleCancel();
-            }, 2000);
+            }, 3000);
             
         } else {
             console.error('❌ API returned error:', result.error);
@@ -357,14 +431,15 @@ function handleCancel() {
     try {
         if (sdk) {
             // Close the modal using SDK
+            console.log('🚪 Closing modal via SDK');
             sdk.execute('close-modal');
         } else {
             // Fallback for testing outside Pipedrive
+            console.log('🚪 Closing modal via window.close()');
             window.close();
         }
     } catch (error) {
         console.error('⚠️ Error closing modal:', error);
-        // Last resort fallback
         window.close();
     }
 }
@@ -376,5 +451,5 @@ window.addEventListener('unhandledrejection', function(event) {
 
 // Log when app is fully loaded
 window.addEventListener('load', function() {
-    console.log('🚀 Workiz Job Creator App Extensions loaded successfully');
+    console.log('🚀 Workiz Job Creator Modal loaded successfully');
 });
