@@ -52,7 +52,12 @@ try {
     ];
     
     file_put_contents('oauth_debug.txt', "Session saved successfully\n", FILE_APPEND);
-    
+
+	// Дополнительно сохраняем в файл для iframe
+	$userFile = "user_data_{$userData['id']}_{$userData['company_id']}.json";
+	file_put_contents($userFile, json_encode($_SESSION['user']));
+	file_put_contents('oauth_debug.txt', "User data saved to file: $userFile\n", FILE_APPEND);
+
     // Перенаправляем на страницу успеха
     header('Location: index.php?action=success');
     exit;
