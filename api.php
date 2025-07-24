@@ -3,6 +3,8 @@ session_start();
 header('Content-Type: application/json');
 
 file_put_contents('api_debug.txt', "=== " . date('Y-m-d H:i:s') . " ===\n", FILE_APPEND);
+file_put_contents('api_debug.txt', "Authorization header: " . ($_SERVER['HTTP_AUTHORIZATION'] ?? 'NOT SET') . "\n", FILE_APPEND);
+file_put_contents('api_debug.txt', "All HTTP headers: " . json_encode(getallheaders()) . "\n", FILE_APPEND);
 
 try {
     // Получаем данные формы
@@ -14,9 +16,65 @@ try {
     }
     
     // Проверяем наличие сессионных данных
-    if (!isset($_SESSION['user']) || !isset($_SESSION['user']['access_token'])) {
-        throw new Exception('User not authenticated. Please setup API credentials first.');
+	//if (!isset($_SESSION['user']) || !isset($_SESSION['user']['access_token'])) {
+		//    throw new Exception('User not authenticated. Please setup API credentials first.');
+		//}
+// Пробуем получить данные из разных источников
+$user = null;
+$apiToken = null;
+
+// Способ 1: Из сессии (если доступна)
+if (isset($_SESSION['user']) && isset($_SESSION['user']['access_token'])) {
+    $user = $_SESSION['user'];
+    $apiToken = $user['access_token'];
+    file_put_contents('api_debug.txt', "Using session auth\n", FILE_APPEND);
+} 
+// Способ 2: Из Authorization header
+elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
+    $apiToken = str_replace('Bearer ', '', $authHeader);
+    file_put_contents('api_debug.txt', "Using Bearer token: " . substr($apiToken, 0, 20) . "...\n", FILE_APPEND);
+    
+    $user = [
+        'access_token' => $apiToken,
+        'api_domain' => 'baymanapllc-sandbox.pipedrive.com'
+    ];
+}
+// Способ 3: Из getallheaders()
+elseif (function_exists('getallheaders')) {
+    $headers = getallheaders();
+    if (isset($headers['Authorization']) || isset($headers['authorization'])) {
+        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        $jwtToken = str_replace('Bearer ', '', $authHeader);
+        file_put_contents('api_debug.txt', "JWT token received: " . substr($jwtToken, 0, 20) . "...\n", FILE_APPEND);
+        
+        // Берем API токен из тела запроса
+        $input = file_get_contents('php://input');
+        $data = json_decode($input, true);
+        
+        if (isset($data['pipedrive_api_token'])) {
+            $apiToken = $data['pipedrive_api_token'];
+            file_put_contents('api_debug.txt', "Using API token from request body: " . substr($apiToken, 0, 20) . "...\n", FILE_APPEND);
+            
+            $user = [
+                'access_token' => $apiToken,
+                'api_domain' => 'baymanapllc-sandbox.pipedrive.com'
+            ];
+        } else {
+            throw new Exception('JWT verified but no API token in request body.');
+        }
+    } else {
+        file_put_contents('api_debug.txt', "No auth method available\n", FILE_APPEND);
+        throw new Exception('User not authenticated. No token provided.');
     }
+} else {
+    file_put_contents('api_debug.txt', "No auth method available\n", FILE_APPEND);
+    throw new Exception('User not authenticated. No token provided.');
+}
+
+if (!$apiToken) {
+    throw new Exception('No API token available');
+}
     
     $user = $_SESSION['user'];
     $apiToken = $user['access_token'];
