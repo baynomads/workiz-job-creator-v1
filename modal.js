@@ -358,7 +358,8 @@ async function handleFormSubmission(e) {
     
     // Show loading state
     submitBtn.disabled = true;
-    loading.classList.add('show');
+    //loading.classList.add('show');
+	if (loading) loading.classList.add('show');
     submitBtn.innerHTML = '⏳ Creating Job... <span class="loading show"></span>';
     
     try {
@@ -381,10 +382,15 @@ async function handleFormSubmission(e) {
         }
 
 		// Передаем реальный API токен
-		if (window.PIPEDRIVE_REAL_API_TOKEN) {
+		/*if (window.PIPEDRIVE_REAL_API_TOKEN) {
 			jobData.pipedrive_api_token = window.PIPEDRIVE_REAL_API_TOKEN;
 		} else if (window.PIPEDRIVE_API_TOKEN) {
 			jobData.pipedrive_api_token = window.PIPEDRIVE_API_TOKEN;
+		}*/
+
+		// Передаем реальный API токен
+		if (window.PIPEDRIVE_REAL_API_TOKEN) {
+			jobData.pipedrive_api_token = window.PIPEDRIVE_REAL_API_TOKEN;
 		}
         
         console.log('📝 Form data collected:', jobData);
@@ -593,33 +599,6 @@ function handleCancel() {
     }
 }
 
-// Получаем реальный API токен из основной сессии
-async function getRealApiToken() {
-    try {
-        const response = await fetch('get-api-token.php');
-        const data = await response.json();
-        
-        if (data.success) {
-            window.PIPEDRIVE_REAL_API_TOKEN = data.api_token;
-            console.log('🔑 Real API token loaded from session');
-            return data.api_token;
-        } else {
-            console.warn('⚠️ Could not get real API token:', data.error);
-            return null;
-        }
-    } catch (error) {
-        console.warn('⚠️ Error getting real API token:', error);
-        return null;
-    }
-}
-
-// Вызываем при загрузке
-document.addEventListener('DOMContentLoaded', async function() {
-    // Получаем реальный API токен
-    await getRealApiToken();
-    
-    // ... остальной код инициализации
-});
 
 // Error handler for unhandled promise rejections
 window.addEventListener('unhandledrejection', function(event) {
