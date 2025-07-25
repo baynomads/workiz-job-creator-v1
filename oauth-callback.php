@@ -1,7 +1,7 @@
 <?php
 session_start();
 
-// OAuth Configuration - ДОЛЖНО СОВПАДАТЬ С index.php!
+// OAuth Configuration - как и в index.php
 $CLIENT_ID = '5e85428e245a85b3';
 $CLIENT_SECRET = 'cf423f70d74e11cf84d6fb2b649e26a79e5d3e4f';
 $REDIRECT_URI = 'https://x.tor.kg/public/workiz-job-creator-v1/oauth-callback.php';
