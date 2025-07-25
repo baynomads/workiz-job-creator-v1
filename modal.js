@@ -364,7 +364,7 @@ async function handleFormSubmission(e) {
     
     console.log('🔥 FORM SUBMISSION STARTED');
 
-	// ДОБАВЬ ЭТУ ОТЛАДКУ В НАЧАЛО!
+// ОТЛАДКА НАЧАЛО
     console.log('🔑 Current authToken:', authToken);
     console.log('🔑 window.PIPEDRIVE_TOKEN:', window.PIPEDRIVE_TOKEN ? window.PIPEDRIVE_TOKEN.substring(0, 20) + '...' : 'NOT SET');
     console.log('🔑 authToken type:', typeof authToken);
