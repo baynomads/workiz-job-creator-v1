@@ -1,5 +1,79 @@
 <?php
 session_start();
+
+function refreshTokenIfNeeded($user) {
+    $now = time();
+    $expires = $user['token_expires'] ?? 0;
+    
+    // Если токен истек ИЛИ истекает в ближайшие 10 минут
+    if ($expires < ($now + 600)) {
+        $status = $expires < $now ? "expired" : "expires soon";
+        file_put_contents('api_debug.txt', "Token $status, refreshing...\n", FILE_APPEND);
+        
+        $newTokens = refreshAccessToken($user['refresh_token']);
+        
+        if ($newTokens) {
+            // Обновляем данные пользователя
+            $user['access_token'] = $newTokens['access_token'];
+            $user['token_expires'] = time() + $newTokens['expires_in'];
+            
+            // Обновляем refresh_token если пришел новый
+            if (isset($newTokens['refresh_token'])) {
+                $user['refresh_token'] = $newTokens['refresh_token'];
+            }
+            
+            // Сохраняем в файл
+            $userFile = "user_data_{$user['id']}_{$user['company_id']}.json";
+            file_put_contents($userFile, json_encode($user));
+            
+            file_put_contents('api_debug.txt', "Token refreshed successfully\n", FILE_APPEND);
+            
+            return $user;
+        } else {
+            file_put_contents('api_debug.txt', "Token refresh failed - may need re-auth\n", FILE_APPEND);
+        }
+    }
+    
+    return $user;
+}
+
+function refreshAccessToken($refreshToken) {
+    global $CLIENT_ID, $CLIENT_SECRET;
+    
+    $CLIENT_ID = '5e85428e245a85b3'; // Ваш ID
+    $CLIENT_SECRET = 'cf423f70d74e11cf84d6fb2b649e26a79e5d3e4f'; // Ваш секрет
+    
+    $tokenData = [
+        'grant_type' => 'refresh_token',
+        'refresh_token' => $refreshToken,
+        'client_id' => $CLIENT_ID,
+        'client_secret' => $CLIENT_SECRET
+    ];
+    
+    $postData = http_build_query($tokenData);
+    
+    $options = [
+        'http' => [
+            'method' => 'POST',
+            'header' => 'Content-Type: application/x-www-form-urlencoded',
+            'content' => $postData,
+            'timeout' => 30
+        ]
+    ];
+    
+    $context = stream_context_create($options);
+    $response = @file_get_contents('https://oauth.pipedrive.com/oauth/token', false, $context);
+    
+    if ($response) {
+        $responseData = json_decode($response, true);
+        if (isset($responseData['access_token'])) {
+            return $responseData;
+        }
+    }
+    
+    return false;
+}
+
 header('Content-Type: application/json');
 
 file_put_contents('api_debug.txt', "=== " . date('Y-m-d H:i:s') . " ===\n", FILE_APPEND);
@@ -14,103 +88,92 @@ try {
     if (!$data) {
         throw new Exception('No data received or invalid JSON');
     }
-    
-    // Проверяем наличие сессионных данных
-	//if (!isset($_SESSION['user']) || !isset($_SESSION['user']['access_token'])) {
-		//    throw new Exception('User not authenticated. Please setup API credentials first.');
-		//}
-// Пробуем получить данные из разных источников
-$user = null;
-$apiToken = null;
-	/*
-// Способ 1: Из сессии (если доступна)
-if (isset($_SESSION['user']) && isset($_SESSION['user']['access_token'])) {
-    $user = $_SESSION['user'];
-    $apiToken = $user['access_token'];
-    file_put_contents('api_debug.txt', "Using session auth\n", FILE_APPEND);
-} 
-// Способ 2: Из Authorization header
-elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
-    $apiToken = str_replace('Bearer ', '', $authHeader);
-    file_put_contents('api_debug.txt', "Using Bearer token: " . substr($apiToken, 0, 20) . "...\n", FILE_APPEND);
-    
-    $user = [
-        'access_token' => $apiToken,
-        'api_domain' => 'baymanapllc-sandbox.pipedrive.com'
-    ];
-}
-// Способ 3: Из getallheaders()
-elseif (function_exists('getallheaders')) {
-    $headers = getallheaders();
-    if (isset($headers['Authorization']) || isset($headers['authorization'])) {
-        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
-        $jwtToken = str_replace('Bearer ', '', $authHeader);
-        file_put_contents('api_debug.txt', "JWT token received: " . substr($jwtToken, 0, 20) . "...\n", FILE_APPEND);
-        
-        // Берем API токен из тела запроса
-        $input = file_get_contents('php://input');
-        $data = json_decode($input, true);
-        
-        if (isset($data['pipedrive_api_token'])) {
-            $apiToken = $data['pipedrive_api_token'];
-            file_put_contents('api_debug.txt', "Using API token from request body: " . substr($apiToken, 0, 20) . "...\n", FILE_APPEND);
-            
-            $user = [
-                'access_token' => $apiToken,
-                'api_domain' => 'baymanapllc-sandbox.pipedrive.com'
-            ];
-        } else {
-            throw new Exception('JWT verified but no API token in request body.');
-        }
-    } else {
-        file_put_contents('api_debug.txt', "No auth method available\n", FILE_APPEND);
-        throw new Exception('User not authenticated. No token provided.');
-    }
-} else {
-    file_put_contents('api_debug.txt', "No auth method available\n", FILE_APPEND);
-    throw new Exception('User not authenticated. No token provided.');
-}*/
-// Проверяем сессию - главный источник API токена
-/*if (!isset($_SESSION['user']) || !isset($_SESSION['user']['access_token'])) {
-    throw new Exception('User not authenticated. Please setup API credentials first.');
-}
 
-$user = $_SESSION['user'];
-$apiToken = $user['access_token'];  // Это настоящий API токен из OAuth
-$apiDomain = $user['api_domain'] ?? '';
-if (!$apiToken) {
-    throw new Exception('No API token available');
-}
-*/
-// Получаем API токен из тела запроса (для iframe)
-if (isset($data['pipedrive_api_token'])) {
-    $apiToken = $data['pipedrive_api_token'];
-    $apiDomain = 'baymanapllc-sandbox.pipedrive.com';
-    file_put_contents('api_debug.txt', "Using API token from request body\n", FILE_APPEND);
-} elseif (isset($_SESSION['user']) && isset($_SESSION['user']['access_token'])) {
-    $user = $_SESSION['user'];
-    $apiToken = $user['access_token'];
-    $apiDomain = $user['api_domain'] ?? '';
-    file_put_contents('api_debug.txt', "Using API token from session\n", FILE_APPEND);
-} else {
-    throw new Exception('User not authenticated. No API token provided.');
-}
-    
-	//$user = $_SESSION['user'];
-	//$apiToken = $user['access_token'];
-	//$apiDomain = $user['api_domain'] ?? '';
+	// Пробуем получить данные из разных источников
+	$user = null;
+	$apiToken = null;
+	
+	/*
+	// Получаем API токен из тела запроса (для iframe)
+	if (isset($data['pipedrive_api_token'])) {
+		$apiToken = $data['pipedrive_api_token'];
+		$apiDomain = 'baymanapllc-sandbox.pipedrive.com';
+		file_put_contents('api_debug.txt', "Using API token from request body\n", FILE_APPEND);
+		*/
+	// Получаем API токен из тела запроса (для iframe)
+	if (isset($data['pipedrive_api_token'])) {
+		// Нужно загрузить данные пользователя из файла и обновить токен
+		$userId = $data['userId'] ?? '';
+		$companyId = $data['companyId'] ?? '';
+		
+		if ($userId && $companyId) {
+			$userFile = "user_data_{$userId}_{$companyId}.json";
+			if (file_exists($userFile)) {
+				$fileUser = json_decode(file_get_contents($userFile), true);
+				$fileUser = refreshTokenIfNeeded($fileUser);
+				$apiToken = $fileUser['access_token'];
+				file_put_contents('api_debug.txt', "Using refreshed API token from file\n", FILE_APPEND);
+			} else {
+				$apiToken = $data['pipedrive_api_token'];
+				file_put_contents('api_debug.txt', "Using API token from request body (no file found)\n", FILE_APPEND);
+			}
+		} else {
+			$apiToken = $data['pipedrive_api_token'];
+			file_put_contents('api_debug.txt', "Using API token from request body (no user data)\n", FILE_APPEND);
+		}
+		
+		$apiDomain = 'baymanapllc-sandbox.pipedrive.com';
+
+	} elseif (isset($_SESSION['user']) && isset($_SESSION['user']['access_token'])) {
+		//$user = $_SESSION['user'];
+		$user = refreshTokenIfNeeded($_SESSION['user']);
+		$apiToken = $user['access_token'];
+		$apiDomain = $user['api_domain'] ?? '';
+		file_put_contents('api_debug.txt', "Using API token from session\n", FILE_APPEND);
+	} else {
+		throw new Exception('User not authenticated. No API token provided.');
+	}
+
 	$apiDomain = $user['api_domain'] ?? 'baymanapllc-sandbox.pipedrive.com';
 	file_put_contents('api_debug.txt', "API Domain set to: $apiDomain\n", FILE_APPEND);
     
     file_put_contents('api_debug.txt', "API Domain: " . $apiDomain . "\n", FILE_APPEND);
     file_put_contents('api_debug.txt', "API Token: " . substr($apiToken, 0, 10) . "...\n", FILE_APPEND);
-    
+
     $isSandbox = strpos($apiDomain, 'sandbox') !== false;
     
     file_put_contents('api_debug.txt', "Environment: " . ($isSandbox ? 'sandbox' : 'production') . "\n", FILE_APPEND);
     file_put_contents('api_debug.txt', "Using file_get_contents (no cURL)\n", FILE_APPEND);
-    
+
+	// В начале, после получения $apiToken и $apiDomain
+	if (isset($data['action']) && $data['action'] === 'get_person') {
+		$personId = $data['person_id'] ?? null;
+		
+		if (!$personId) {
+			echo json_encode(['success' => false, 'error' => 'Person ID required']);
+			exit;
+		}
+		
+		try {
+			file_put_contents('api_debug.txt', "Getting person data for ID: $personId\n", FILE_APPEND);
+			file_put_contents('api_debug.txt', "Using token: " . substr($apiToken, 0, 10) . "...\n", FILE_APPEND);
+			file_put_contents('api_debug.txt', "Using domain: $apiDomain\n", FILE_APPEND);
+			
+			$response = makePipedriveRequest('GET', "persons/{$personId}", null, $apiToken, $apiDomain);
+			
+			if ($response && isset($response['success']) && $response['success']) {
+				echo json_encode(['success' => true, 'data' => $response['data']]);
+			} else {
+				echo json_encode(['success' => false, 'error' => 'Person not found', 'response' => $response]);
+			}
+		} catch (Exception $e) {
+			echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+		}
+		
+		exit;
+	}
+
+
     // Тестируем API подключение с file_get_contents
     file_put_contents('api_debug.txt', "Testing API connection...\n", FILE_APPEND);
 	//$testResponse = makePipedriveRequest('GET', 'users/me', null, $apiToken);
@@ -124,10 +187,10 @@ if (isset($data['pipedrive_api_token'])) {
     // Логируем данные
     logJobData($data, $apiDomain);
     
-    // 1. Создаем персону
-    file_put_contents('api_debug.txt', "Creating person...\n", FILE_APPEND);
-    $personData = createPersonSimple($data, $apiToken, $apiDomain);
-    file_put_contents('api_debug.txt', "Person created: " . json_encode($personData) . "\n", FILE_APPEND);
+    // 1. Создаем персону (временно отключил)
+	//file_put_contents('api_debug.txt', "Creating person...\n", FILE_APPEND);
+	//$personData = createPersonSimple($data, $apiToken, $apiDomain);
+	//file_put_contents('api_debug.txt', "Person created: " . json_encode($personData) . "\n", FILE_APPEND);
     
     // 2. Создаем сделку
     file_put_contents('api_debug.txt', "Creating deal...\n", FILE_APPEND);
@@ -398,10 +461,20 @@ function makePipedriveRequest($method, $endpoint, $data = null, $apiToken = null
     
     file_put_contents('api_debug.txt', "Parsed Response: " . json_encode($responseData) . "\n", FILE_APPEND);
 
-    if ($httpCode >= 400) {
-        $errorMessage = isset($responseData['error']) ? $responseData['error'] : "HTTP {$httpCode}";
-        throw new Exception("Pipedrive API error: {$errorMessage}");
-    }
+	//if ($httpCode >= 400) {
+		//    $errorMessage = isset($responseData['error']) ? $responseData['error'] : "HTTP {$httpCode}";
+		//    throw new Exception("Pipedrive API error: {$errorMessage}");
+		//}
+	if ($httpCode >= 400) {
+		$errorMessage = isset($responseData['error']) ? $responseData['error'] : "HTTP {$httpCode}";
+		
+		// Если 401 - возможно истек токен
+		if ($httpCode === 401 && strpos($errorMessage, 'Invalid token') !== false) {
+			file_put_contents('api_debug.txt', "Got 401 - token may be expired\n", FILE_APPEND);
+		}
+		
+		throw new Exception("Pipedrive API error: {$errorMessage}");
+	}
     
     return $responseData;
 }
