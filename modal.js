@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 		// Простая инициализация
 		sdk = await new AppExtensionsSDK().initialize({
 			size: {
-				height: 800,
+				height: 950,
 				width: 800
 			}
 		});
@@ -50,7 +50,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         
 		// Get signed token
 		try {
-			const tokenData = await sdk.execute('GET_SIGNED_TOKEN');
+			const tokenData = await sdk.execute('getSignedToken');
 			authToken = tokenData.token;
 			console.log('🔑 JWT token received from SDK successfully');
 		} catch (tokenError) {
@@ -66,7 +66,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // Get current context
         try {
-			currentContext = await sdk.execute('GET_CURRENT_CONTEXT') || {};
+			currentContext = await sdk.execute('getCurrentContext') || {};
             console.log('📋 Current context received:', currentContext);
             
             // Дополнительно извлекаем данные из URL если контекст пустой
@@ -100,7 +100,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 };
             }
         }
-        
+
         // Pre-fill form if we have context data
         prefillFormFromContext();
         
@@ -109,7 +109,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // Notify Pipedrive that modal is ready (resize)
         try {
-            await sdk.execute('resize', { height: 650, width: 800 });
+            await sdk.execute('resize', { height: 950, width: 800 });
             console.log('📐 Modal resized successfully');
         } catch (resizeError) {
             console.warn('⚠️ Could not resize modal:', resizeError.message);
@@ -166,35 +166,64 @@ function showInitializationError(error) {
 }
 
 // Pre-fill form based on current Pipedrive context
-function prefillFormFromContext() {
+async function prefillFormFromContext() {
     if (!currentContext) return;
     
     try {
         console.log('🔍 Pre-filling form from context...', currentContext);
         
-        // If we're in a person context, pre-fill client details
+        // Если есть person context, получаем полные данные
         if (currentContext.person) {
-            const person = currentContext.person;
-            console.log('👤 Pre-filling from person:', person);
+            const personId = currentContext.person.id;
+            console.log('👤 Loading full person data for ID:', personId);
             
-            fillPersonData(person);
+            await loadPersonData(personId);
         }
         
-        // If we're in a deal context, pre-fill some job details
+        // Если есть deal context, предзаполняем job детали
         if (currentContext.deal) {
             console.log('💼 Deal context available:', currentContext.deal.title);
             fillDealData(currentContext.deal);
-        }
-        
-        // If we're in an organization context, pre-fill address
-        if (currentContext.organization && currentContext.organization.address) {
-            document.getElementById('address').value = currentContext.organization.address || '';
         }
         
         console.log('✅ Form pre-filled successfully');
         
     } catch (error) {
         console.error('⚠️ Error pre-filling form:', error);
+    }
+}
+
+// Load full person data from Pipedrive API
+async function loadPersonData(personId) {
+    try {
+        const response = await fetch('api.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(authToken && authToken !== 'session-based' ? {
+                    'Authorization': `Bearer ${authToken}`
+                } : {})
+            },
+			body: JSON.stringify({
+				action: 'get_person',
+				person_id: personId,
+				pipedrive_api_token: window.PIPEDRIVE_REAL_API_TOKEN || window.PIPEDRIVE_API_TOKEN,
+				userId: currentContext.userId,
+				companyId: currentContext.companyId
+			})
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            fillPersonData(result.data);
+            console.log('✅ Person data loaded and filled');
+        } else {
+            console.warn('⚠️ Could not load person data:', result.error);
+        }
+        
+    } catch (error) {
+        console.error('⚠️ Error loading person data:', error);
     }
 }
 
@@ -382,16 +411,12 @@ async function handleFormSubmission(e) {
         }
 
 		// Передаем реальный API токен
-		/*if (window.PIPEDRIVE_REAL_API_TOKEN) {
-			jobData.pipedrive_api_token = window.PIPEDRIVE_REAL_API_TOKEN;
-		} else if (window.PIPEDRIVE_API_TOKEN) {
-			jobData.pipedrive_api_token = window.PIPEDRIVE_API_TOKEN;
-		}*/
-
-		// Передаем реальный API токен
 		if (window.PIPEDRIVE_REAL_API_TOKEN) {
 			jobData.pipedrive_api_token = window.PIPEDRIVE_REAL_API_TOKEN;
 		}
+		// Добавляем user данные для автообновления токенов
+		jobData.userId = currentContext.userId;
+		jobData.companyId = currentContext.companyId;
         
         console.log('📝 Form data collected:', jobData);
         
@@ -435,16 +460,35 @@ async function handleFormSubmission(e) {
             
             // Show success message
             successMessage.innerHTML = `
-                ✅ <strong>Job Created Successfully!</strong><br>
-                Deal: ${result.data.deal_title || 'New Deal'}<br>
-                <small>Deal ID: ${result.data.deal_id}</small>
-            `;
-            successMessage.style.display = 'block';
-            
+				✅ <strong>Job Created Successfully!</strong><br>
+				Deal: ${result.data.deal_title || 'New Deal'}<br>
+				<small>Deal ID: ${result.data.deal_id}</small><br><br>
+				<div style="display: flex; gap: 10px; justify-content: center;">
+					<button id="viewDealBtn" class="btn btn-primary" style="font-size: 12px; padding: 8px 16px;">
+						🔗 View Deal
+					</button>
+					<button id="closeModalBtn" class="btn btn-secondary" style="font-size: 12px; padding: 8px 16px;">
+						✖️ Close
+					</button>
+				</div>
+			`;
+			
+			// Добавляем обработчики кнопок
+			document.getElementById('viewDealBtn').addEventListener('click', () => {
+				openDealInPipedrive(result.data.pipedrive_url);
+			});
+			
+			document.getElementById('closeModalBtn').addEventListener('click', handleCancel);
+
+			// ПОКАЗЫВАЕМ success message и скрываем кнопку submit
+			successMessage.style.display = 'block';
+			submitBtn.style.display = 'none';  // Скрываем кнопку submit
+			document.getElementById('cancelBtn').style.display = 'none';  // Скрываем Cancel
+
             // Show snackbar in Pipedrive
             if (sdk) {
                 try {
-                    await sdk.execute('show-snackbar', {
+                    await sdk.execute('showSnackbar', {
                         message: `Job "${result.data.deal_title}" created successfully!`,
                         link: result.data.pipedrive_url ? {
                             url: result.data.pipedrive_url,
@@ -455,30 +499,26 @@ async function handleFormSubmission(e) {
                     console.warn('⚠️ Could not show snackbar:', snackbarError.message);
                 }
             }
-            
-            // Clear form
-            document.getElementById('jobForm').reset();
-            
-            // Close modal after 3 seconds
-            setTimeout(() => {
-                handleCancel();
-            }, 3000);
-            
+
         } else {
             console.error('❌ API returned error:', result.error);
             throw new Error(result.error || 'Failed to create job');
         }
         
     } catch (error) {
-        console.error('❌ Error creating job:', error);
-        
-        errorMessage.style.display = 'block';
-        document.getElementById('errorDetails').textContent = error.message;
+		console.error('❌ Error creating job:', error);
+		
+		errorMessage.style.display = 'block';
+		document.getElementById('errorDetails').textContent = error.message;
+
+		// Сбрасываем кнопку только при ошибке
+		submitBtn.disabled = false;
+		submitBtn.innerHTML = '🚀 Create Job';
         
         // Show error snackbar in Pipedrive
         if (sdk) {
             try {
-                await sdk.execute('SHOW_SNACKBAR', {
+                await sdk.execute('showSnackbar', {
                     message: `Error creating job: ${error.message}`
                 });
             } catch (snackbarError) {
@@ -487,13 +527,11 @@ async function handleFormSubmission(e) {
         }
         
     } finally {
-        // Reset button state
-        submitBtn.disabled = false;
-        loading.classList.remove('show');
-        submitBtn.innerHTML = '🚀 Create Job';
-        
-        console.log('🏁 Form submission completed');
-    }
+		// НЕ сбрасываем состояние кнопки при успехе - пусть остается скрытой
+		if (loading) loading.classList.remove('show');
+
+		console.log('🏁 Form submission completed');
+	}
 }
 
 // Form validation
@@ -584,12 +622,11 @@ function validateTimeRange() {
 // Handle cancel button click
 function handleCancel() {
     try {
-        if (sdk) {
-            // Close the modal using SDK
+        if (sdk && window.AppExtensionsSDK) {
             console.log('🚪 Closing modal via SDK');
-            sdk.execute('CLOSE_MODAL');
+            const { Command } = window.AppExtensionsSDK;
+            sdk.execute(Command.CLOSE_MODAL);
         } else {
-            // Fallback for testing outside Pipedrive
             console.log('🚪 Closing modal via window.close()');
             window.close();
         }
@@ -599,6 +636,14 @@ function handleCancel() {
     }
 }
 
+// Open deal in Pipedrive and close modal
+function openDealInPipedrive(dealUrl) {
+    if (dealUrl) {
+        window.open(dealUrl, '_blank');
+    }
+    // Закрываем модал через секунду
+    setTimeout(handleCancel, 1000);
+}
 
 // Error handler for unhandled promise rejections
 window.addEventListener('unhandledrejection', function(event) {
