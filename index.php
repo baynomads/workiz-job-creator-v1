@@ -342,7 +342,7 @@ function showSuccessPage() {
 
 
 function showModal() {
-	// ОТЛАДКА - добавь в начало функции
+	// ОТЛАДКА - начало функции
 	file_put_contents('index_debug.txt', "=== " . date('Y-m-d H:i:s') . " ===\n", FILE_APPEND);
 	file_put_contents('index_debug.txt', "DEBUG showModal: Called with GET: " . json_encode($_GET) ."\n", FILE_APPEND);
 
@@ -428,7 +428,7 @@ function showModal() {
 	// ОТЛАДКА - проверяем что заменилось
 	file_put_contents('index_debug.txt', "After modal.js replacement, looking for: src=\"modal.js?v=" . $version . "\"\n", FILE_APPEND);
     
-    // ПЕРЕДАЕМ ВСЕ ДАННЫЕ В JAVASCRIPT
+    // ПЕРЕДАЕМ ВСЕ ДАННЫЕ В JS
     $tokenScript = "
     <script>
         window.PIPEDRIVE_TOKEN = '" . addslashes($accessToken) . "';
